@@ -1,0 +1,270 @@
+---
+title: "Shooting"
+author: "Koki Ando"
+date: "5/5/2018"
+output:
+  html_document:
+    code_folding: show
+    highlight: tango
+    number_section: yes
+    theme: cosmo
+    toc: yes
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+Dataset is from [US Mass Shootings](https://www.kaggle.com/zusmani/us-mass-shootings-last-50-years) from Kaggle.</br>
+Mass shooting in the U.S. has been a quite big problem. Especcially, these day i saw topics related to shooting accidents on so many media because of the accident in Las Vegas. However, to be honest, i had no idea this problems were so big until I hear the shooting in Las Vegas since i was grown up in the society which has nothing to do with any types of wapons like guns.</br>
+I felt really embarassed being such fool. So, for myself and those who are not familiar with this social problems, i would like to try analyse this dataset and understand a little bit more about what is actually going on in the U.S. and hopefully this article will help you understand and have interests about guns problems.
+
+# Data Source
+
+1. [Mass shootings in the United States by year](https://en.wikipedia.org/wiki/Category%3aMass_shootings_in_the_United_States_by_year)
+2. [Mother Jones](https://www.motherjones.com/politics/2012/12/mass-shootings-mother-jones-full-data/)
+3. [USA Today](http://www.gannett-cdn.com/GDContent/mass-killings/index.html#title)
+4. [Stanford: Mass Shootings in America](https://library.stanford.edu/projects/mass-shootings-america)
+
+# Motivation of this analysis
+
+1. Visualizations of the dataset to help readers understand more easily.
+2. What cities and states are more prone to attacks.
+3. To find out correlations with dates.
+4. Combine other dataset with this dataset to have further understandings and discoveries.
+5. To have better understanding about gun problems in the U.S.
+
+# Preparation
+
+```{r message = FALSE}
+library(tidyverse) #for data cleaning and better visualizations
+library(data.table) # to import handle dataset faster
+library(maps) # for map visualization
+library(stringr) # to manipulate character type data variables
+library(plotly) # for interactive visualizations
+library(DT) # interactive data table
+
+shoot <- fread("Mass Shootings Dataset Ver 5.csv", data.table = F)
+shoot <- shoot[,-1]
+shoot$Date <- as.Date(shoot$Date, "%m/%d/%Y")
+names(shoot)[11] <- "Total_victims"
+names(shoot)[16] <- "Mental_Health_Issues"
+shoot$Age <- as.numeric(shoot$Age)
+```
+
+# Data Content
+
+```{r}
+shoot %>% head()
+```
+
+The dataset has detailed information about 328 mass shootings that happened from 1966 to 2017. The latest accident in this dataset was "Texas church mass shooting" on November 5th in 2017. The oldest accident was "University of Texas at Austin" on August 1st in 1966.
+
+Here are some of the variables that describe details on each accident:
+* Location(Latitude/Longitude): Explains where exactly each accident happened;
+* Open/Close Location: Open location means that the accident happened at open space. Close location means that the accident happened inside a bulding;
+* Mental Health Issues: Inditates whether the criminal had mental issues or not;
+
+# Analysis
+
+## Geospatial Analysis
+
+### Map Visualization
+
+```{r}
+world.map <- map_data("state")
+ggplot() + 
+  geom_map(data=world.map, map=world.map,
+           aes(x=long, y=lat, group=group, map_id=region),
+           fill="white", colour="black") + 
+  geom_point(data = shoot, 
+             aes(x = Longitude, y = Latitude, size = Fatalities), 
+             colour = "red", alpha = .6) +
+  xlim(-130, -65) + ylim(25,50) +
+  labs(title = "Mass Shootings that happened from 1966 to 2017")
+```
+
+### What states are more prone to those accidents?
+
+```{r}
+shoot <- shoot %>% 
+  separate(Location, into = c("City", "State"), sep = ", ")
+
+pattern <- c("TX|CO|MD|NV|CA|PA|WA|LA")
+replacement <- c("Texas", "Colorado", "Maryland", "Nevada", "California", "Pennsylvania", "Washington", "Los Angels")
+shoot$State <- shoot$State %>% 
+  str_replace_all(pattern = pattern, 
+                  replacement = replacement)
+shoot$State <- shoot$State %>% str_replace_all(c("Texas " = "Texas", " Virginia" = "Virginia"))
+shoot$State <- as.factor(shoot$State)
+```
+
+```{r}
+state_bar <- as.data.frame(table(shoot$State)) %>% 
+  ggplot(aes(x = reorder(Var1, -Freq), y= Freq, fill = Var1)) + 
+  geom_bar(stat = "identity", show.legend=F) + 
+  labs(x = "State", y = "Count") + 
+  theme(axis.text.x = element_text(angle = 90))
+ggplotly(state_bar)
+```
+
+## Time series analysis
+
+```{r}
+shoot <- shoot %>% 
+  mutate(Year = year(Date), 
+         Month = month(Date),
+         Weekday = weekdays(Date),
+         Week = week(Date),
+         WeekMonth = 1+Week-min(Week),
+         weekdaynumber = 
+           case_when(Weekday == "Monday" ~ 1, Weekday == "Tuesday" ~ 2, Weekday == "Wednesday" ~ 3,
+                     Weekday == "Thursday" ~ 4, Weekday == "Friday" ~ 5, Weekday == "Saturday" ~ 6,
+                     Weekday == "Sunday" ~ 7),
+         MonthChar = 
+           case_when(Month == 1 ~ "Jan", Month == 2 ~ "Feb", Month == 3 ~ "Mar", Month == 4 ~ "Apr", Month == 5 ~ "May", Month == 6 ~ "Jun",  
+                     Month == 7 ~ "Jul", Month == 8 ~ "Aug", Month == 9 ~ "Sep", Month == 10 ~ "Oct", Month == 11 ~ "Nov", Month == 12 ~ "Dec"))
+```
+
+### Calendar Plot 1
+
+```{r}
+shoot %>% 
+  plot_ly(x = ~ Month, y = ~Year, z = ~Total_victims, 
+          type = "heatmap", mode = 'makers', 
+          hoverinfo = 'text',
+          text = ~paste(Year, "/",MonthChar,
+                        ' ', Total_victims, 'victims', 
+                        '"', Title, '"'))
+```
+
+The only thing you will recognise is that the Las vegas shooting that happened in october in 2017 stands out extraordinary. Because of that, we can not tell anything alse. </br>
+So, this lead me that, how about ploting every accidents apart from this shooting accident?
+
+### Calendar Plot 2
+
+```{r}
+shoot %>% 
+  filter(Title != "Las Vegas Strip mass shooting") %>%  
+  plot_ly(x = ~ Month, y = ~Year, z = ~Total_victims, 
+          type = "heatmap", mode = 'makers', 
+          hoverinfo = 'text',
+          text = ~paste(Year, "/",MonthChar,
+                        ' ', Total_victims, 'victims', 
+                        '"', Title, '"'))
+```
+
+Other than the Las Vegas shooting, this plot shows us so many other gun-related accidents that deserve attentions paid such as orland accident in 2016.
+The second one was "Aurora theater shooting" with 82 victims.</br>
+As I mentioned before, the last year's accident at Las Vegas was by far the most shocking one and brought biggest threat to the entire world. However, those ones are also something we should pay attentions to. I hope this second calendar plot works for those people who want more understanding about the history of US gun shooting accidents history.</br>
+Let's take a alittle closer look at those accidents. At this time, I am gonna take a look at 5 accidents that had unfortunately ended up with so many victims.
+
+### Datatable of Histrocal Shooting Accidents
+
+```{r}
+shoot %>% 
+  filter(Title != "Las Vegas Strip mass shooting") %>%
+  arrange(desc(Total_victims)) %>% 
+  select(Summary, Title:Date, -City, Age) %>% 
+  head(5) %>% 
+  datatable(options = 
+              list(pageLength = 5,
+                   lengthMenu = c(1,5)))
+```
+
+One common thing I can tell from those 5 incidents was all criminals was in 20s. They are so young.</br>
+
+Those are the wikipedia links of each shooting accident.</br>
+1. [Orlando nightclub massacre](https://en.wikipedia.org/wiki/Orlando_nightclub_shooting)
+2. [Aurora theater shooting](https://en.wikipedia.org/wiki/2012_Aurora_shooting)
+3. [Virginia Tech massacre](https://en.wikipedia.org/wiki/Virginia_Tech_shooting)
+4. [University of Texas at Austin](https://en.wikipedia.org/wiki/University_of_Texas_tower_shooting)
+5. [Texas church mass shooting](https://en.wikipedia.org/wiki/Sutherland_Springs_church_shooting)
+
+It is really heartbreaking and devastatingly shoking to read those of all. I want you guys to read as well if you are ready to know what has actually happened behind all of those data.</br>
+
+Datasets are really important to understand things, however it is not enough to actually know what actually happened in our history. I really apreciate this dataset provider for giving me opportunities to get interested in this huge social problem in the biggest nation in the entire world.
+
+## Age Distribution
+
+```{r}
+distribution <- shoot %>% 
+  ggplot(aes(x = Age)) + 
+  geom_histogram(col = "red", fill = "pink") + 
+  labs(title = "Age Distibition of Criminals")
+ggplotly(distribution)
+```
+
+Here is the distribution of criminals' age. A surprising thing i tell from this plot is that there so many teen ager criminals.
+
+```{r}
+shoot <- shoot %>% 
+  mutate(Decade = (case_when(Year >= 1960 & Year < 1970 ~ "1960s", 
+                             Year >= 1970 & Year < 1980 ~ "1970s", 
+                             Year >= 1980 & Year < 1990 ~ "1980s", 
+                             Year >= 1990 & Year < 2000 ~ "1990s", 
+                             Year >= 2000 & Year < 2010 ~ "2000s", 
+                             Year >= 2010 & Year < 2020 ~ "2010s")))
+```
+
+```{r}
+decade_boxplot <- shoot %>% 
+  ggplot(aes(x = Decade, y = Age, fill = Decade)) +
+  geom_boxplot() + 
+  labs(x = "Each Decade", title = "Age Distribution of Each Dacade")
+ggplotly(decade_boxplot)
+```
+
+The spread of criminals' age has been getting bigger as the time passes. This may indicates that the accesibilities to guns are getting easier throughout the country.
+
+```{r}
+pattern2 = c("black|Some other race|white")
+replacement2 = c("Black", "Other", "White")
+shoot$Race <- shoot$Race %>% 
+  str_replace(pattern = pattern2, replacement = replacement2)
+```
+
+## Analysis of Criminals' Profile
+
+```{r}
+transition <- shoot %>% 
+  ggplot(aes(x = Year, fill = Race)) + 
+  geom_bar() +
+  labs(title = "Transition of the races of criminals")
+ggplotly(transition) %>% layout(showlegend = FALSE)
+```
+
+```{r}
+decade_trasition_race <- shoot %>% 
+  ggplot(aes(x = Decade, fill = Race)) + 
+  geom_histogram(stat = "count", show.legend = F, 
+                 position = "fill") + 
+  labs(title = "Transition of the Ratio of the Races of Criminals by Each Decade")
+ggplotly(decade_trasition_race) %>% layout(showlegend = FALSE)
+```
+
+In 20th century, the main races of criminals were white americans or european americans. However, in 21st century, the number of the other races increased dramatically. </br>
+Maybe the imiigrants have impacts to this number.
+
+## What were Mental Health Issues?
+
+```{r}
+as.data.frame(table(shoot$Mental_Health_Issues))[-1,] %>%
+  plot_ly(labels = ~Var1, values = ~Freq, type = 'pie') %>%
+  layout(title = 'What were the mental health issues?',
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+```
+
+Really unfortunately this dataset doesn't provide mental health issues terrorists had. Over the half of all the mental health issues are unknown or unclear.</br>
+I tried to find the dataset related to mental health issues, however i couldn't.
+
+# Conclusion
+First of all, my condolences and prayers to all the victims, their families and loved ones. People who were involved in those crimes would not even want to see and read this article. However, throughout this analysis, I could get better understanding what has been going on  un the U.S, and I m really happy if more people get attentions by reading my report.</br>
+Obviously, It is not a easy problem to solve, however i believe that having better undarstaing will brondens the possibilities of success and reduce the risks.</br>
+Thank you for taking time to read my report.</br>
+
+Koki
